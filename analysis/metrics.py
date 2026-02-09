@@ -65,7 +65,13 @@ def analyze_single_dataset(
         print(f"  Using {len(is_correct_fields)} preprocessed fields")
 
     # Directly aggregate boolean values
-    for field in is_correct_fields:
+    field_iterator = tqdm(
+        is_correct_fields,
+        desc="    Aggregating methods",
+        leave=False,
+        disable=False  # Always show nested progress
+    )
+    for field in field_iterator:
         # Parse field name: is_correct_method@number format
         # Skip fields that don't match (like is_correct_preds)
         match = re.match(r"is_correct_(naive|weighted|maj)@(\d+)", field)
@@ -128,7 +134,12 @@ def analyze_pass_at_k(
 
     # Aggregate pass@k values across problems
     results = {}
-    for k, field_name in pass_k_fields.items():
+    for k, field_name in tqdm(
+        pass_k_fields.items(),
+        desc="    Computing pass@k",
+        leave=False,
+        disable=False  # Always show nested progress
+    ):
         pass_k_values = [row[field_name] for row in dataset if field_name in row]
         if pass_k_values:
             results[k] = sum(pass_k_values) / len(pass_k_values)

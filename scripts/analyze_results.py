@@ -28,6 +28,7 @@ from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
+from tqdm import tqdm
 
 # Add exp directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -201,10 +202,12 @@ def discover_and_load(
             results[path] = (config, datasets_by_temp)
 
         except Exception as e:
+            print(f"\n  ERROR discovering/loading {path}: {e}")
             if verbose:
-                print(f"  Error: {e}")
-            import traceback
-            traceback.print_exc()
+                import traceback
+                traceback.print_exc()
+            # Continue to next path instead of failing entirely
+            continue
 
     return results
 
@@ -220,8 +223,19 @@ def analyze_all(
     """
     all_results = {}
 
-    for hub_path, (config, datasets_by_temp) in loaded_data.items():
+    # Wrap hub_path iteration with tqdm for overall progress
+    pbar = tqdm(
+        loaded_data.items(),
+        desc="Analyzing experiments",
+        total=len(loaded_data),
+        disable=False  # Always show progress bar
+    )
+
+    for hub_path, (config, datasets_by_temp) in pbar:
         if verbose:
+            # Update progress bar with current hub path
+            hub_short = hub_path.split('/')[-1]
+            pbar.set_postfix_str(f"hub={hub_short}")
             print(f"\nAnalyzing: {hub_path}")
 
         path_results = {}
@@ -234,13 +248,25 @@ def analyze_all(
             temp_results = {}
 
             for seed, dataset in datasets.items():
-                # Analyze pred_* methods (naive, weighted, maj)
-                metrics = analyze_single_dataset(dataset, hub_path, seed, verbose=verbose)
-                temp_results[seed] = metrics
+                try:
+                    if verbose:
+                        print(f"    Seed {seed}...", end=" ", flush=True)
 
-                # Analyze pass@k
-                pass_at_k = analyze_pass_at_k(dataset, hub_path, seed, verbose=verbose)
-                temp_results[seed]['pass@k'] = pass_at_k
+                    # Analyze pred_* methods (naive, weighted, maj)
+                    metrics = analyze_single_dataset(dataset, hub_path, seed, verbose=verbose)
+                    temp_results[seed] = metrics
+
+                    # Analyze pass@k
+                    pass_at_k = analyze_pass_at_k(dataset, hub_path, seed, verbose=verbose)
+                    temp_results[seed]['pass@k'] = pass_at_k
+
+                    if verbose:
+                        print("Done")
+                except Exception as e:
+                    print(f"\n  ERROR analyzing seed {seed} (hub={hub_path}, temp={temp}): {e}")
+                    import traceback
+                    traceback.print_exc()
+                    raise  # Fail fast with context
 
             path_results[temp] = temp_results
 
