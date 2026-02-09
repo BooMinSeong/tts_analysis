@@ -6,16 +6,16 @@ All metadata (seeds, temperatures, etc.) is automatically discovered from Hub.
 
 Usage:
     # Analyze a single experiment
-    python exp/scripts/analyze_results.py ENSEONG/hnc-Qwen2.5-1.5B-Instruct-bon
+    python scripts/analyze_results.py ENSEONG/hnc-Qwen2.5-1.5B-Instruct-bon
 
     # Analyze a category from registry
-    python exp/scripts/analyze_results.py --category math500_hnc
+    python scripts/analyze_results.py --category math500_hnc
 
     # Compare HNC vs Default for MATH-500
-    python exp/scripts/analyze_results.py --category math500_hnc,math500_default --analysis-type hnc_comparison
+    python scripts/analyze_results.py --category math500_hnc,math500_default --analysis-type hnc_comparison
 
     # List available experiments
-    python exp/scripts/analyze_results.py --list
+    python scripts/analyze_results.py --list
 """
 
 import argparse
@@ -49,21 +49,21 @@ def generate_output_dir_from_category(category: str) -> str:
     """Generate output directory from category name.
 
     Examples:
-        math500_Qwen2.5-1.5B -> exp/analysis_output-MATH500-Qwen2.5-1.5B
-        math500_Qwen2.5-1.5B_hnc -> exp/analysis_output-MATH500-Qwen2.5-1.5B_hnc
-        aime25_Qwen2.5-3B -> exp/analysis_output-AIME25-Qwen2.5-3B
+        math500_Qwen2.5-1.5B -> analysis_output-MATH500-Qwen2.5-1.5B
+        math500_Qwen2.5-1.5B_hnc -> analysis_output-MATH500-Qwen2.5-1.5B_hnc
+        aime25_Qwen2.5-3B -> analysis_output-AIME25-Qwen2.5-3B
 
     Returns:
         Output directory path based on category
     """
     parts = category.split("_", 1)  # Split only on first underscore
     if len(parts) < 2:
-        return "exp/analysis_output"
+        return "analysis_output"
 
     dataset = parts[0].upper()  # math500 -> MATH500, aime25 -> AIME25
     model_and_strategy = parts[1]  # Qwen2.5-1.5B or Qwen2.5-1.5B_hnc
 
-    return f"exp/analysis_output-{dataset}-{model_and_strategy}"
+    return f"analysis_output-{dataset}-{model_and_strategy}"
 
 
 def parse_args():
@@ -85,7 +85,7 @@ def parse_args():
     parser.add_argument(
         "--registry",
         type=str,
-        default="exp/configs/registry.yaml",
+        default="configs/registry.yaml",
         help="Path to registry YAML file",
     )
     parser.add_argument(
@@ -119,7 +119,7 @@ def parse_args():
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="exp/analysis_output",
+        default="analysis_output",
         help="Output directory for results (auto-generated from category if not specified)",
     )
     parser.add_argument(
@@ -1183,7 +1183,7 @@ def main():
     hub_paths = list(dict.fromkeys(hub_paths))
 
     # Auto-generate output directory from category if not explicitly specified
-    if args.category and args.output_dir == "exp/analysis_output":
+    if args.category and args.output_dir == "analysis_output":
         first_category = args.category.split(",")[0].strip()
         args.output_dir = generate_output_dir_from_category(first_category)
         print(f"Auto-generated output directory: {args.output_dir}")

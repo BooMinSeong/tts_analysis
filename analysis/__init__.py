@@ -10,7 +10,7 @@ This module provides utilities for:
 - Visualization
 
 Example usage (new auto-discovery way):
-    from exp.analysis import discover_experiment, load_experiment_data
+    from analysis import discover_experiment, load_experiment_data
 
     config = discover_experiment("ENSEONG/hnc-Qwen2.5-1.5B-Instruct-bon")
     print(f"Auto-discovered seeds: {config.seeds}")

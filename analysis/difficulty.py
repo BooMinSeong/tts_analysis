@@ -153,7 +153,7 @@ def compute_problem_baselines_from_preds(
     """Compute baseline difficulty for each problem using preprocessed is_correct_* fields.
 
     This function uses preprocessed is_correct_* fields for fast baseline computation.
-    The datasets must be preprocessed using exp/scripts/preprocess_dataset.py.
+    The datasets must be preprocessed using scripts/preprocess_dataset.py.
 
     For each unique problem:
     1. Extract is_correct_{method}@{n_samples} value across seeds and approaches
@@ -231,7 +231,7 @@ def compute_problem_baselines_from_preds(
             if target_field not in dataset.features:
                 raise ValueError(
                     f"Dataset for {approach} seed {seed} does not have field '{target_field}'. "
-                    f"Please run exp/scripts/preprocess_dataset.py first."
+                    f"Please run scripts/preprocess_dataset.py first."
                 )
 
             if verbose and seed == list(seeds_data.keys())[0]:  # Print once per approach

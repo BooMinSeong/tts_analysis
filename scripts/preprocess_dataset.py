@@ -9,28 +9,28 @@ can use the preprocessed datasets for 20-30x faster analysis.
 
 Usage:
     # Preprocess a single hub path
-    python exp/scripts/preprocess_dataset.py \
+    python scripts/preprocess_dataset.py \
         --hub-path ENSEONG/default-MATH-500-Qwen2.5-1.5B-Instruct-bon \
         --push-to-hub
 
     # Preprocess from category (all experiments in category)
-    python exp/scripts/preprocess_dataset.py \
+    python scripts/preprocess_dataset.py \
         --category math500_Qwen2.5-1.5B \
         --push-to-hub
 
     # Preprocess specific subsets only
-    python exp/scripts/preprocess_dataset.py \
+    python scripts/preprocess_dataset.py \
         --hub-path ENSEONG/default-MATH-500-Qwen2.5-1.5B-Instruct-bon \
         --subsets "HuggingFaceH4_MATH-500--T-0.4--top_p-1.0--n-64--seed-42--agg_strategy-last" \
         --push-to-hub
 
     # Save locally instead of pushing to hub
-    python exp/scripts/preprocess_dataset.py \
+    python scripts/preprocess_dataset.py \
         --hub-path ENSEONG/default-MATH-500-Qwen2.5-1.5B-Instruct-bon \
         --output-dir /tmp/preprocessed
 
     # Custom output hub path
-    python exp/scripts/preprocess_dataset.py \
+    python scripts/preprocess_dataset.py \
         --hub-path ENSEONG/default-MATH-500-Qwen2.5-1.5B-Instruct-bon \
         --output-hub-path ENSEONG/my-custom-preprocessed-dataset \
         --push-to-hub
@@ -370,7 +370,7 @@ def parse_args():
     parser.add_argument(
         "--registry",
         type=str,
-        default="exp/configs/registry.yaml",
+        default="configs/registry.yaml",
         help="Path to registry YAML file",
     )
 

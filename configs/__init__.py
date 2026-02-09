@@ -4,10 +4,10 @@ This module provides functions to load the experiment registry from YAML files.
 The new auto-discovery system uses hub_paths only; all metadata is discovered from Hub.
 
 Example usage (new way):
-    from exp.configs import load_hub_registry
-    from exp.analysis.discovery import discover_experiment
+    from configs import load_hub_registry
+    from analysis.discovery import discover_experiment
 
-    registry = load_hub_registry("exp/configs/registry.yaml")
+    registry = load_hub_registry("configs/registry.yaml")
     for path in registry.get_category("math500_hnc"):
         config = discover_experiment(path)
         print(f"{path}: seeds={config.seeds}, temps={config.temperatures}")
@@ -47,8 +47,8 @@ def load_registry(path: Union[str, Path]) -> Registry:
     This function is deprecated. Use load_hub_registry() and auto-discovery instead.
 
     The new registry format only contains hub_paths. Use:
-        from exp.configs import load_hub_registry
-        from exp.analysis.discovery import discover_experiment
+        from configs import load_hub_registry
+        from analysis.discovery import discover_experiment
 
         registry = load_hub_registry(path)
         for hub_path in registry.all_paths:

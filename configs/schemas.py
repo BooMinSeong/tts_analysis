@@ -135,12 +135,12 @@ class AnalysisConfig:
         filter_category: Category filter
         output_dir: Output directory for results
     """
-    registry_path: str = "exp/configs/registry.yaml"
+    registry_path: str = "configs/registry.yaml"
     filter_approach: Optional[str] = None
     filter_strategy: Optional[str] = None
     filter_model: Optional[str] = None
     filter_category: Optional[str] = None
-    output_dir: str = "exp/analysis_output"
+    output_dir: str = "analysis_output"
 
 
 # =============================================================================
@@ -151,7 +151,7 @@ class AnalysisConfig:
 class ResultEntry:
     """DEPRECATED: Legacy result entry for backward compatibility.
 
-    Use ExperimentConfig from exp.analysis.discovery instead.
+    Use ExperimentConfig from analysis.discovery instead.
     """
     name: str
     hub_path: str

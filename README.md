@@ -3,6 +3,55 @@
 실험 결과 분석을 위한 모듈입니다. **Hub 데이터가 Single Source of Truth**입니다.
 Seeds, temperatures 등 모든 메타데이터는 Hub에서 자동으로 발견됩니다.
 
+## 간단한 사용 예제
+
+### 5분 안에 시작하기
+
+```bash
+# 1. 사용 가능한 실험 목록 확인
+uv run python scripts/analyze_results.py --list
+
+# 2. 특정 실험 분석 (자동으로 seeds, temperatures 발견)
+uv run python scripts/analyze_results.py ENSEONG/hnc-Qwen2.5-1.5B-Instruct-bon
+
+# 3. 카테고리 전체 분석
+uv run python scripts/analyze_results.py --category math500_Qwen2.5-1.5B_hnc
+
+# 4. 온도별 비교 분석
+uv run python scripts/analyze_results.py \
+    --category math500_Qwen2.5-1.5B \
+    --analysis-type temperature_comparison
+```
+
+**결과물**:
+- `{model}-{approach}-scaling.png`: 성능 스케일링 커브
+- `analysis_report.md`: 상세 통계 리포트 (평균 ± 표준편차)
+- 콘솔 출력: 주요 메트릭 요약
+
+### Python에서 사용하기
+
+```python
+from analysis import discover_experiment, load_experiment_data_by_temperature, analyze_single_dataset
+
+# Hub에서 자동 발견 (seeds, temperatures 등)
+config = discover_experiment("ENSEONG/hnc-Qwen2.5-1.5B-Instruct-bon")
+print(f"발견된 seeds: {config.seeds}")
+print(f"발견된 temperatures: {config.temperatures}")
+
+# 온도별로 데이터 로드
+datasets_by_temp = load_experiment_data_by_temperature(config)
+
+# 첫 번째 온도의 첫 번째 seed 분석
+temp = config.temperatures[0]
+seed = config.seeds[0]
+dataset = datasets_by_temp[temp][seed]
+
+# 분석 실행
+metrics = analyze_single_dataset(dataset, config.approach, seed)
+print(f"Naive@4 accuracy: {metrics['naive'][4]:.2%}")
+print(f"Majority@16 accuracy: {metrics['maj'][16]:.2%}")
+```
+
 ## 핵심 원칙
 
 기존 방식에서는 registry.yaml에 seeds, temperatures를 수동으로 지정했지만,
@@ -23,7 +72,7 @@ print(config.temperatures) # [(0.4, 0.8, 1.2, 1.6), ...] - 자동 발견!
 ## 디렉토리 구조
 
 ```
-exp/
+tts_analysis/
 ├── configs/
 │   ├── registry.yaml     # Hub 경로만 저장 (최소화)
 │   └── schemas.py        # HubRegistry, 설정 클래스
@@ -45,7 +94,7 @@ exp/
 ### 1. 자동 발견
 
 ```python
-from exp.analysis import discover_experiment, summarize_experiment
+from analysis import discover_experiment, summarize_experiment
 
 # 단일 실험 발견
 config = discover_experiment("ENSEONG/hnc-Qwen2.5-1.5B-Instruct-bon")
@@ -63,7 +112,7 @@ print(summary)
 ### 2. 데이터셋 로드
 
 ```python
-from exp.analysis import discover_experiment, load_experiment_data, load_experiment_data_by_temperature
+from analysis import discover_experiment, load_experiment_data, load_experiment_data_by_temperature
 
 config = discover_experiment("ENSEONG/default-aime25-Qwen2.5-1.5B-Instruct-bon")
 
@@ -84,7 +133,7 @@ for temp, seed_datasets in datasets_by_temp.items():
 ### 3. 분석 실행
 
 ```python
-from exp.analysis import analyze_single_dataset, analyze_pass_at_k
+from analysis import analyze_single_dataset, analyze_pass_at_k
 
 # 단일 데이터셋 분석
 metrics = analyze_single_dataset(dataset, "hnc-bon", seed=128)
@@ -100,7 +149,7 @@ pass_at_k = analyze_pass_at_k(dataset, "hnc-bon", seed=128)
 ### 실험 목록 확인
 
 ```bash
-python exp/scripts/analyze_results.py --list
+uv run python scripts/analyze_results.py --list
 ```
 
 출력:
@@ -118,17 +167,17 @@ python exp/scripts/analyze_results.py --list
 ### 단일 실험 분석
 
 ```bash
-python exp/scripts/analyze_results.py ENSEONG/hnc-Qwen2.5-1.5B-Instruct-bon
+uv run python scripts/analyze_results.py ENSEONG/hnc-Qwen2.5-1.5B-Instruct-bon
 ```
 
 ### 카테고리 분석
 
 ```bash
 # MATH-500 HNC 실험들 분석
-python exp/scripts/analyze_results.py --category math500_hnc
+uv run python scripts/analyze_results.py --category math500_hnc
 
 # HNC vs Default 비교
-python exp/scripts/analyze_results.py \
+uv run python scripts/analyze_results.py \
     --category math500_hnc,math500_default \
     --analysis-type hnc_comparison
 ```
@@ -148,12 +197,12 @@ python exp/scripts/analyze_results.py \
 
 ```bash
 # AIME25 데이터셋의 온도별 비교
-python exp/scripts/analyze_results.py \
+uv run python scripts/analyze_results.py \
     --category aime25_1.5B \
     --analysis-type temperature_comparison
 
 # 특정 실험의 온도 비교
-python exp/scripts/analyze_results.py \
+uv run python scripts/analyze_results.py \
     ENSEONG/default-aime25-Qwen2.5-1.5B-Instruct-bon \
     --analysis-type temperature_comparison
 ```
@@ -181,16 +230,16 @@ python exp/scripts/analyze_results.py \
 
 ```bash
 # 플롯 없이 리포트만
-python exp/scripts/analyze_results.py --category math500_hnc --no-plots
+uv run python scripts/analyze_results.py --category math500_hnc --no-plots
 
 # 상세 출력
-python exp/scripts/analyze_results.py --category math500_hnc -v
+uv run python scripts/analyze_results.py --category math500_hnc -v
 
 # 출력 디렉토리 지정
-python exp/scripts/analyze_results.py --category math500_hnc --output-dir ./my_output
+uv run python scripts/analyze_results.py --category math500_hnc --output-dir ./my_output
 
 # 특정 온도만 분석
-python exp/scripts/analyze_results.py --category math500_default --temperature 0.8
+uv run python scripts/analyze_results.py --category math500_default --temperature 0.8
 ```
 
 ## Registry 구조
@@ -232,7 +281,7 @@ HuggingFaceH4_MATH-500--temps_0.4_0.8_1.2_1.6__r_0.25_0.25_0.25_0.25--...--seed-
 ### 자동 발견
 
 ```python
-from exp.analysis import (
+from analysis import (
     discover_experiment,      # Hub에서 설정 자동 발견
     ExperimentConfig,         # 발견된 설정 클래스
     create_registry_from_hub_paths,  # 여러 경로 한번에 발견
@@ -242,7 +291,7 @@ from exp.analysis import (
 ### 파서
 
 ```python
-from exp.analysis import (
+from analysis import (
     parse_subset_name,        # Subset 이름 파싱
     SubsetInfo,               # 파싱 결과 클래스
     infer_approach_from_hub_path,
@@ -253,7 +302,7 @@ from exp.analysis import (
 ### 데이터셋
 
 ```python
-from exp.analysis import (
+from analysis import (
     load_experiment_data,              # 기본 로드 (첫 번째 온도)
     load_experiment_data_by_temperature,  # 온도별 로드 (권장)
     load_all_experiment_data,          # 모든 (온도, seed) 조합 로드
@@ -265,7 +314,7 @@ from exp.analysis import (
 ### 분석
 
 ```python
-from exp.analysis import (
+from analysis import (
     analyze_single_dataset,   # 단일 데이터셋 분석
     analyze_pass_at_k,        # Pass@k 분석
     evaluate_answer,          # 답변 평가

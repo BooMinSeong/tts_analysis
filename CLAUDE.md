@@ -213,7 +213,7 @@ Examples:
 
 Analysis scripts generate outputs in designated directories:
 - `analysis_output/`: Default output for comparative analyses
-- `exp/analysis_output-{DATASET}-{MODEL}-{APPROACH}-{TYPE}/`: Specific analyses
+- `analysis_output-{DATASET}-{MODEL}-{APPROACH}-{TYPE}/`: Specific analyses
 
 Generated artifacts:
 - `*.png`: Matplotlib figures (scaling curves, comparisons, heatmaps)

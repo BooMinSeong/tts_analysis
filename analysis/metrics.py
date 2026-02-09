@@ -26,7 +26,7 @@ def analyze_single_dataset(
     """Analyze a single preprocessed dataset and return accuracy by method and sample count.
 
     This function uses preprocessed is_correct_* fields for fast analysis.
-    The dataset must be preprocessed using exp/scripts/preprocess_dataset.py.
+    The dataset must be preprocessed using scripts/preprocess_dataset.py.
 
     Args:
         dataset: Preprocessed HuggingFace dataset (or dict with 'train' split)
@@ -58,7 +58,7 @@ def analyze_single_dataset(
         raise ValueError(
             f"Dataset {dataset_name} is not preprocessed. "
             f"No is_correct_* fields found. "
-            f"Please run exp/scripts/preprocess_dataset.py first."
+            f"Please run scripts/preprocess_dataset.py first."
         )
 
     if verbose:

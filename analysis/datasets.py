@@ -7,8 +7,8 @@ The key principle: Hub data is the Single Source of Truth.
 Instead of manually specifying seeds/temperatures, we discover them automatically.
 
 Example usage:
-    from exp.analysis.discovery import discover_experiment
-    from exp.analysis.datasets import load_experiment_data
+    from analysis.discovery import discover_experiment
+    from analysis.datasets import load_experiment_data
 
     # Discover configuration from Hub
     config = discover_experiment("ENSEONG/hnc-Qwen2.5-1.5B-Instruct-bon")

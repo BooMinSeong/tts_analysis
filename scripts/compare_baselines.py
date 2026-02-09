@@ -21,10 +21,10 @@ def get_level(accuracy):
 
 def main():
     # Load both baseline files
-    with open('exp/analysis_output-MATH500-Qwen2.5-1.5B-bon-difficulty/difficulty_baselines.json') as f:
+    with open('analysis_output-MATH500-Qwen2.5-1.5B-bon-difficulty/difficulty_baselines.json') as f:
         baseline_t01 = json.load(f)
 
-    with open('exp/analysis_output-MATH500-Qwen2.5-1.5B-bon-difficulty-ref0.8/difficulty_baselines.json') as f:
+    with open('analysis_output-MATH500-Qwen2.5-1.5B-bon-difficulty-ref0.8/difficulty_baselines.json') as f:
         baseline_t08 = json.load(f)
 
     print("=" * 70)
@@ -161,7 +161,7 @@ def main():
         'top_diversity_hurting': harder_sorted[:20]
     }
 
-    output_path = 'exp/analysis_output-MATH500-Qwen2.5-1.5B-bon-difficulty/baseline_comparison.json'
+    output_path = 'analysis_output-MATH500-Qwen2.5-1.5B-bon-difficulty/baseline_comparison.json'
     with open(output_path, 'w') as f:
         json.dump(output, f, indent=2)
 

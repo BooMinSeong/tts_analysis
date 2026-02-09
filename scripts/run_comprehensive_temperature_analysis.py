@@ -12,10 +12,10 @@ import sys
 from pathlib import Path
 
 # Add project root to path
-project_root = Path(__file__).parent.parent.parent
+project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from exp.analysis.temperature_reference_analysis import run_comprehensive_analysis
+from analysis.temperature_reference_analysis import run_comprehensive_analysis
 
 
 def main():
@@ -26,31 +26,31 @@ def main():
     parser.add_argument(
         "--bon-ref01-dir",
         type=Path,
-        default=Path("exp/analysis_output-MATH500-Qwen2.5-3B-bon-difficulty"),
+        default=Path("analysis_output-MATH500-Qwen2.5-3B-bon-difficulty"),
         help="BoN T=0.1 baseline analysis directory",
     )
     parser.add_argument(
         "--bon-ref08-dir",
         type=Path,
-        default=Path("exp/analysis_output-MATH500-Qwen2.5-3B-bon-difficulty-ref0.8"),
+        default=Path("analysis_output-MATH500-Qwen2.5-3B-bon-difficulty-ref0.8"),
         help="BoN T=0.8 baseline analysis directory",
     )
     parser.add_argument(
         "--dvts-ref01-dir",
         type=Path,
-        default=Path("exp/analysis_output-MATH500-Qwen2.5-3B-dvts-difficulty"),
+        default=Path("analysis_output-MATH500-Qwen2.5-3B-dvts-difficulty"),
         help="DVTS T=0.1 baseline analysis directory",
     )
     parser.add_argument(
         "--dvts-ref08-dir",
         type=Path,
-        default=Path("exp/analysis_output-MATH500-Qwen2.5-3B-dvts-difficulty-ref0.8"),
+        default=Path("analysis_output-MATH500-Qwen2.5-3B-dvts-difficulty-ref0.8"),
         help="DVTS T=0.8 baseline analysis directory",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("exp/comprehensive_temperature_analysis-MATH500-Qwen2.5-3B"),
+        default=Path("comprehensive_temperature_analysis-MATH500-Qwen2.5-3B"),
         help="Output directory for combined analysis",
     )
 

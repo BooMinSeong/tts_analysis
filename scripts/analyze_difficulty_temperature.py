@@ -8,27 +8,27 @@ temperature (default: lowest temperature) using a specific metric field
 
 Usage:
     # Analyze from category (uses lowest temperature as reference, maj@max as baseline)
-    python exp/scripts/analyze_difficulty_temperature.py \
+    python scripts/analyze_difficulty_temperature.py \
         --category math500_Qwen2.5-1.5B \
         --approach bon \
-        --output-dir exp/analysis_output-MATH500-Qwen2.5-1.5B-difficulty
+        --output-dir analysis_output-MATH500-Qwen2.5-1.5B-difficulty
 
     # Analyze from hub path
-    python exp/scripts/analyze_difficulty_temperature.py \
+    python scripts/analyze_difficulty_temperature.py \
         --hub-path ENSEONG/default-MATH-500-Qwen2.5-1.5B-Instruct-bon \
-        --output-dir exp/analysis_output-MATH500-Qwen2.5-1.5B-difficulty
+        --output-dir analysis_output-MATH500-Qwen2.5-1.5B-difficulty
 
     # Specify custom reference temperature and baseline method
-    python exp/scripts/analyze_difficulty_temperature.py \
+    python scripts/analyze_difficulty_temperature.py \
         --category math500_Qwen2.5-1.5B \
         --approach bon \
         --reference-temp 0.1 \
         --baseline-method maj \
         --baseline-n 64 \
-        --output-dir exp/analysis_output-MATH500-Qwen2.5-1.5B-difficulty
+        --output-dir analysis_output-MATH500-Qwen2.5-1.5B-difficulty
 
     # Customize difficulty thresholds
-    python exp/scripts/analyze_difficulty_temperature.py \
+    python scripts/analyze_difficulty_temperature.py \
         --category math500_Qwen2.5-1.5B \
         --approach bon \
         --thresholds "1:0.9,1.0" "2:0.7,0.9" "3:0.5,0.7" "4:0.3,0.5" "5:0.0,0.3"
@@ -87,7 +87,7 @@ def parse_args():
     parser.add_argument(
         "--registry",
         type=str,
-        default="exp/configs/registry.yaml",
+        default="configs/registry.yaml",
         help="Path to registry YAML file",
     )
     parser.add_argument(
