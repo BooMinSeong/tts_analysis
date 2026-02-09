@@ -17,11 +17,17 @@ at the selected temperature, then stratified by absolute accuracy thresholds:
   Level 5: 0-20% (hardest)
 
 Usage:
-    # Per-problem trajectory analysis (output auto-generated)
+    # Single-temperature mode (existing behavior)
     uv run python scripts/analyze_score_trajectory.py \
         --category math500_Qwen2.5-3B \
         --approach bon \
         --temperature 0.8 \
+        --verbose
+
+    # Multi-temperature mode (NEW - analyzes all temperatures)
+    uv run python scripts/analyze_score_trajectory.py \
+        --category math500_Qwen2.5-3B \
+        --approach bon \
         --verbose
 
     # More samples per level
@@ -37,14 +43,22 @@ Usage:
         --temperature 0.8 \
         --output-dir outputs/traj-custom
 
-Output (in outputs/traj-{category}-{approach}-{temperature}/):
+Output (single-temp in outputs/traj-{category}-{approach}-{temperature}/):
     - per_problem/level_{N}.png: Grid of sampled problems per difficulty level,
       each subplot showing all individual completion trajectories
     - score_trajectory_report.md: Per-problem statistics table
     - score_trajectory_overall.png: Aggregate comparison (supplementary)
+
+Output (multi-temp in outputs/traj-{category}-{approach}-multi/):
+    - metadata.json: Temperatures analyzed, reference temp, seeds
+    - temperature_comparison_report.md: Cross-temp summary
+    - difficulty_baselines.json: From reference temp (if --save-baselines)
+    - T{temp}/ subdirectories with per-temp analysis
+    - comparison/level_*.png: Cross-temperature trajectory comparisons
 """
 
 import argparse
+import json
 import os
 import shutil
 import sys
@@ -69,10 +83,14 @@ from analysis.difficulty import (
     compute_problem_baselines_from_completions,
     stratify_by_absolute_difficulty,
 )
-from analysis.difficulty_temperature import DEFAULT_DIFFICULTY_THRESHOLDS
+from analysis.difficulty_temperature import (
+    DEFAULT_DIFFICULTY_THRESHOLDS,
+    filter_dataset_by_problems,
+)
 
 
 NUM_BINS = 50  # For aggregate interpolation
+REFERENCE_TEMPERATURE = 0.1  # Default reference temperature for difficulty baselines
 
 
 def parse_args():
@@ -122,14 +140,25 @@ def parse_args():
     parser.add_argument(
         "--temperature",
         type=float,
-        required=True,
-        help="Temperature to analyze",
+        default=None,
+        help="Temperature to analyze (single-temp mode). Omit for multi-temp mode.",
+    )
+    parser.add_argument(
+        "--reference-temp",
+        type=float,
+        default=REFERENCE_TEMPERATURE,
+        help=f"Reference temperature for difficulty baselines (default: {REFERENCE_TEMPERATURE})",
     )
     parser.add_argument(
         "--seed",
         type=int,
         default=None,
         help="Use only this seed (default: use first available)",
+    )
+    parser.add_argument(
+        "--save-baselines",
+        action="store_true",
+        help="Save difficulty baselines to JSON file",
     )
     parser.add_argument(
         "--verbose", "-v",
@@ -163,8 +192,96 @@ def get_hub_path_from_category(
     return None
 
 
-def extract_per_problem_data(dataset) -> dict[str, dict]:
+def filter_valid_temperatures(
+    datasets_by_temp: dict[float, dict[int, Any]],
+    reference_temp: float,
+    verbose: bool = True,
+) -> list[float]:
+    """Filter to temperatures with complete seed coverage.
+
+    Args:
+        datasets_by_temp: {temp: {seed: Dataset}}
+        reference_temp: Reference temperature (baseline for seed requirements)
+        verbose: Print filtering messages
+
+    Returns:
+        List of valid temperatures (those with complete seed coverage)
+    """
+    if reference_temp not in datasets_by_temp:
+        raise ValueError(f"Reference temperature {reference_temp} not found in data")
+
+    reference_seeds = set(datasets_by_temp[reference_temp].keys())
+    valid_temps = []
+
+    for temp in sorted(datasets_by_temp.keys()):
+        temp_seeds = set(datasets_by_temp[temp].keys())
+        if temp_seeds >= reference_seeds:  # Has all reference seeds
+            valid_temps.append(temp)
+        elif verbose:
+            missing = reference_seeds - temp_seeds
+            print(f"  Skipping T={temp}: missing seeds {sorted(missing)}")
+
+    return valid_temps
+
+
+def get_consistent_problem_set(
+    datasets_by_temp: dict[float, dict[int, Any]],
+    difficulty_levels: dict,
+    verbose: bool = True,
+) -> dict[int, list[str]]:
+    """Get consistent problem sets per difficulty level across all temperatures.
+
+    For each difficulty level, computes the intersection of problems available
+    across all temperatures. This ensures fair comparison.
+
+    Args:
+        datasets_by_temp: {temp: {seed: Dataset}}
+        difficulty_levels: {level: DifficultyLevel}
+        verbose: Print consistency info
+
+    Returns:
+        {level: [problem_ids]} - consistent problem sets per level
+    """
+    consistent_sets = {}
+
+    for level, level_info in difficulty_levels.items():
+        # For this level, collect problem sets from each temperature
+        problem_sets = []
+
+        for temp in sorted(datasets_by_temp.keys()):
+            # Get all problems from all seeds at this temperature
+            temp_problems = set()
+            for seed, dataset in datasets_by_temp[temp].items():
+                if "train" in dataset:
+                    dataset = dataset["train"]
+                for row in dataset:
+                    unique_id = row.get("unique_id", row.get("problem", ""))
+                    if unique_id in level_info.problem_ids:
+                        temp_problems.add(unique_id)
+            problem_sets.append(temp_problems)
+
+        # Take intersection across all temperatures
+        if problem_sets:
+            consistent = set.intersection(*problem_sets)
+            consistent_sets[level] = sorted(consistent)
+
+            if verbose:
+                original_count = len(level_info.problem_ids)
+                consistent_count = len(consistent)
+                if consistent_count < original_count:
+                    print(f"  Level {level}: {consistent_count}/{original_count} problems (intersection)")
+        else:
+            consistent_sets[level] = []
+
+    return consistent_sets
+
+
+def extract_per_problem_data(dataset, problem_filter: Optional[set[str]] = None) -> dict[str, dict]:
     """Extract per-problem trajectory data from a single dataset.
+
+    Args:
+        dataset: Dataset to extract from
+        problem_filter: Optional set of problem IDs to include (for filtering)
 
     Returns:
         {unique_id: {
@@ -181,6 +298,10 @@ def extract_per_problem_data(dataset) -> dict[str, dict]:
     for problem in dataset:
         unique_id = problem.get("unique_id", problem.get("problem", ""))
         if not unique_id:
+            continue
+
+        # Apply filter if provided
+        if problem_filter is not None and unique_id not in problem_filter:
             continue
 
         scores = problem.get("scores", [])
@@ -411,6 +532,124 @@ def generate_aggregate_plot(
         print(f"  Saved: {path}")
 
 
+def generate_temperature_comparison_plots(
+    per_problem_data_by_temp: dict[float, dict[str, dict]],
+    difficulty_levels: dict,
+    output_dir: str,
+    verbose: bool = True,
+):
+    """Generate cross-temperature comparison plots, one per difficulty level.
+
+    Args:
+        per_problem_data_by_temp: {temp: {problem_id: trajectory_data}}
+        difficulty_levels: {level: DifficultyLevel}
+        output_dir: Output directory
+        verbose: Print progress
+    """
+    comparison_dir = os.path.join(output_dir, "comparison")
+    os.makedirs(comparison_dir, exist_ok=True)
+
+    temperatures = sorted(per_problem_data_by_temp.keys())
+    colors = plt.cm.viridis(np.linspace(0, 0.9, len(temperatures)))
+
+    for level in sorted(difficulty_levels.keys()):
+        level_info = difficulty_levels[level]
+
+        fig, (ax_correct, ax_incorrect) = plt.subplots(1, 2, figsize=(14, 6))
+
+        for temp_idx, temp in enumerate(temperatures):
+            per_problem_data = per_problem_data_by_temp[temp]
+
+            # Collect trajectories for this level
+            correct_trajs = []
+            incorrect_trajs = []
+
+            for pid in level_info.problem_ids:
+                data = per_problem_data.get(pid)
+                if data is None:
+                    continue
+                correct_trajs.extend(data["correct"])
+                incorrect_trajs.extend(data["incorrect"])
+
+            # Interpolate to common grid
+            target_x = np.linspace(0.0, 1.0, NUM_BINS)
+
+            def interpolate_trajs(trajs):
+                if not trajs:
+                    return None
+                result = []
+                for traj in trajs:
+                    if len(traj) == 1:
+                        result.append(np.full(NUM_BINS, traj[0]))
+                    else:
+                        src_x = np.linspace(0.0, 1.0, len(traj))
+                        result.append(np.interp(target_x, src_x, traj))
+                return np.array(result)
+
+            # Plot correct trajectories
+            if correct_trajs:
+                c_interp = interpolate_trajs(correct_trajs)
+                mean, std = c_interp.mean(axis=0), c_interp.std(axis=0)
+                ax_correct.plot(
+                    target_x, mean,
+                    color=colors[temp_idx],
+                    linewidth=2,
+                    label=f"T={temp} (n={len(c_interp)})",
+                )
+                ax_correct.fill_between(
+                    target_x, mean - std, mean + std,
+                    color=colors[temp_idx],
+                    alpha=0.15,
+                )
+
+            # Plot incorrect trajectories
+            if incorrect_trajs:
+                i_interp = interpolate_trajs(incorrect_trajs)
+                mean, std = i_interp.mean(axis=0), i_interp.std(axis=0)
+                ax_incorrect.plot(
+                    target_x, mean,
+                    color=colors[temp_idx],
+                    linewidth=2,
+                    label=f"T={temp} (n={len(i_interp)})",
+                )
+                ax_incorrect.fill_between(
+                    target_x, mean - std, mean + std,
+                    color=colors[temp_idx],
+                    alpha=0.15,
+                )
+
+        # Format correct panel
+        ax_correct.set_xlabel("Normalized Step Position")
+        ax_correct.set_ylabel("PRM Score")
+        ax_correct.set_title("Correct Completions")
+        ax_correct.legend(fontsize=9)
+        ax_correct.grid(True, alpha=0.3)
+        ax_correct.set_ylim(-0.05, 1.05)
+
+        # Format incorrect panel
+        ax_incorrect.set_xlabel("Normalized Step Position")
+        ax_incorrect.set_ylabel("PRM Score")
+        ax_incorrect.set_title("Incorrect Completions")
+        ax_incorrect.legend(fontsize=9)
+        ax_incorrect.grid(True, alpha=0.3)
+        ax_incorrect.set_ylim(-0.05, 1.05)
+
+        fig.suptitle(
+            f"Level {level} - Temperature Comparison "
+            f"(acc: [{level_info.min_accuracy:.0%}, {level_info.max_accuracy:.0%}], "
+            f"{level_info.problem_count} problems)",
+            fontsize=14,
+        )
+        fig.tight_layout(rect=[0, 0, 1, 0.96])
+
+        path = os.path.join(comparison_dir, f"level_{level}_temp_comparison.png")
+        fig.savefig(path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+        if verbose:
+            print(f"  Saved: {path}")
+
+
 def generate_report(
     per_problem_data: dict[str, dict],
     difficulty_levels: dict,
@@ -519,28 +758,6 @@ def main():
         print("Error: No hub path specified")
         sys.exit(1)
 
-    # Determine output directory
-    if args.output_dir:
-        output_dir = args.output_dir
-    elif category and approach:
-        output_dir = f"outputs/traj-{category}-{approach}-{args.temperature}"
-    else:
-        print("Error: --output-dir is required when using --hub-path")
-        sys.exit(1)
-
-    print("=" * 70)
-    print("PRM Score Trajectory Analysis (Per-Problem)")
-    print("=" * 70)
-    print(f"\nHub path: {hub_path}")
-    print(f"Output:   {output_dir}")
-
-    # Clean output directory
-    if os.path.exists(output_dir):
-        if args.verbose:
-            print(f"\nCleaning output directory: {output_dir}")
-        shutil.rmtree(output_dir)
-    os.makedirs(output_dir, exist_ok=True)
-
     # Discover experiment
     if args.verbose:
         print("\nDiscovering experiment configuration...")
@@ -560,128 +777,438 @@ def main():
         print(f"  Seeds: {config.seeds}")
         print(f"  Temperatures: {config.temperatures}")
 
-    # Validate temperature
+    # Filter to single temperatures only (not HNC)
     single_temps = [t for t in config.temperatures if isinstance(t, (int, float))]
-    if args.temperature not in single_temps:
-        print(f"Error: Temperature {args.temperature} not available. Available: {single_temps}")
-        sys.exit(1)
 
-    selected_temp = args.temperature
-
-    # Select seed
-    if args.seed is not None:
-        if args.seed not in config.seeds:
-            print(f"Error: Seed {args.seed} not available. Available: {config.seeds}")
+    # Mode detection: single-temp vs multi-temp
+    if args.temperature is not None:
+        # SINGLE-TEMPERATURE MODE (existing behavior)
+        if args.temperature not in single_temps:
+            print(f"Error: Temperature {args.temperature} not available. Available: {single_temps}")
             sys.exit(1)
-        selected_seed = args.seed
-    else:
-        selected_seed = config.seeds[0]
 
-    print(f"\nTemperature: {selected_temp}")
-    print(f"Seed (for plots): {selected_seed}")
+        selected_temp = args.temperature
 
-    # Load only the selected temperature (all seeds for difficulty baseline)
-    if args.verbose:
-        print(f"\nLoading datasets for T={selected_temp}...")
+        # Determine output directory
+        if args.output_dir:
+            output_dir = args.output_dir
+        elif category and approach:
+            output_dir = f"outputs/traj-{category}-{approach}-{args.temperature}"
+        else:
+            print("Error: --output-dir is required when using --hub-path")
+            sys.exit(1)
 
-    try:
-        datasets_by_temp = load_experiment_data_by_temperature(
-            config,
-            temperatures=[selected_temp],
-            verbose=args.verbose,
-        )
-    except Exception as e:
-        print(f"Error loading datasets: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+        print("=" * 70)
+        print("PRM Score Trajectory Analysis (Single-Temperature)")
+        print("=" * 70)
+        print(f"\nHub path: {hub_path}")
+        print(f"Output:   {output_dir}")
 
-    if selected_temp not in datasets_by_temp or not datasets_by_temp[selected_temp]:
-        print(f"Error: No datasets loaded for T={selected_temp}")
-        sys.exit(1)
+        # Clean output directory
+        if os.path.exists(output_dir):
+            if args.verbose:
+                print(f"\nCleaning output directory: {output_dir}")
+            shutil.rmtree(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
 
-    seed_datasets = datasets_by_temp[selected_temp]
+        # Select seed
+        if args.seed is not None:
+            if args.seed not in config.seeds:
+                print(f"Error: Seed {args.seed} not available. Available: {config.seeds}")
+                sys.exit(1)
+            selected_seed = args.seed
+        else:
+            selected_seed = config.seeds[0]
 
-    # Compute difficulty baselines from this temperature's data (all seeds)
-    if args.verbose:
-        print(f"\nComputing difficulty baselines from T={selected_temp} ({len(seed_datasets)} seeds)...")
+        print(f"\nTemperature: {selected_temp}")
+        print(f"Seed (for plots): {selected_seed}")
 
-    # Format as {approach: {seed: Dataset}} for baseline computation
-    baseline_input = {f"T{selected_temp}": seed_datasets}
+        # Load only the selected temperature (all seeds for difficulty baseline)
+        if args.verbose:
+            print(f"\nLoading datasets for T={selected_temp}...")
 
-    try:
-        baselines = compute_problem_baselines_from_completions(
-            baseline_input,
-            aggregate_across_approaches=True,
-            verbose=args.verbose,
-        )
-    except Exception as e:
-        print(f"Error computing baselines: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+        try:
+            datasets_by_temp = load_experiment_data_by_temperature(
+                config,
+                temperatures=[selected_temp],
+                verbose=args.verbose,
+            )
+        except Exception as e:
+            print(f"Error loading datasets: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
 
-    # Stratify by absolute difficulty thresholds
-    try:
-        difficulty_levels = stratify_by_absolute_difficulty(
+        if selected_temp not in datasets_by_temp or not datasets_by_temp[selected_temp]:
+            print(f"Error: No datasets loaded for T={selected_temp}")
+            sys.exit(1)
+
+        seed_datasets = datasets_by_temp[selected_temp]
+
+        # Compute difficulty baselines from this temperature's data (all seeds)
+        if args.verbose:
+            print(f"\nComputing difficulty baselines from T={selected_temp} ({len(seed_datasets)} seeds)...")
+
+        # Format as {approach: {seed: Dataset}} for baseline computation
+        baseline_input = {f"T{selected_temp}": seed_datasets}
+
+        try:
+            baselines = compute_problem_baselines_from_completions(
+                baseline_input,
+                aggregate_across_approaches=True,
+                verbose=args.verbose,
+            )
+        except Exception as e:
+            print(f"Error computing baselines: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+
+        # Stratify by absolute difficulty thresholds
+        try:
+            difficulty_levels = stratify_by_absolute_difficulty(
+                baselines,
+                thresholds=DEFAULT_DIFFICULTY_THRESHOLDS,
+                verbose=args.verbose,
+            )
+        except Exception as e:
+            print(f"Error stratifying: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+
+        # Extract per-problem data from selected seed for plotting
+        if selected_seed not in seed_datasets:
+            print(f"Error: No dataset for seed={selected_seed} at T={selected_temp}")
+            print(f"Available seeds: {list(seed_datasets.keys())}")
+            sys.exit(1)
+
+        target_dataset = seed_datasets[selected_seed]
+        per_problem_data = extract_per_problem_data(target_dataset)
+
+        n_with_scores = sum(1 for d in per_problem_data.values() if d["correct"] or d["incorrect"])
+        print(f"\nExtracted trajectories for {n_with_scores} problems (T={selected_temp}, seed={selected_seed})")
+
+        if n_with_scores == 0:
+            print("Error: No problems with score trajectories found.")
+            sys.exit(1)
+
+        # Generate per-problem plots
+        print("\nGenerating per-problem trajectory plots...")
+        generate_per_problem_plots(
+            per_problem_data,
+            difficulty_levels,
             baselines,
-            thresholds=DEFAULT_DIFFICULTY_THRESHOLDS,
+            output_dir,
+            samples_per_level=args.samples_per_level,
             verbose=args.verbose,
         )
-    except Exception as e:
-        print(f"Error stratifying: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
 
-    # Extract per-problem data from selected seed for plotting
-    if selected_seed not in seed_datasets:
-        print(f"Error: No dataset for seed={selected_seed} at T={selected_temp}")
-        print(f"Available seeds: {list(seed_datasets.keys())}")
-        sys.exit(1)
+        # Generate aggregate plot (supplementary)
+        print("\nGenerating aggregate plot...")
+        generate_aggregate_plot(per_problem_data, output_dir, verbose=args.verbose)
 
-    target_dataset = seed_datasets[selected_seed]
-    per_problem_data = extract_per_problem_data(target_dataset)
+        # Generate report
+        print("\nGenerating report...")
+        generate_report(
+            per_problem_data,
+            difficulty_levels,
+            baselines,
+            output_dir,
+            hub_path=hub_path,
+            temp_used=selected_temp,
+            seed_used=selected_seed,
+            verbose=args.verbose,
+        )
 
-    n_with_scores = sum(1 for d in per_problem_data.values() if d["correct"] or d["incorrect"])
-    print(f"\nExtracted trajectories for {n_with_scores} problems (T={selected_temp}, seed={selected_seed})")
+        print("\n" + "=" * 70)
+        print("Analysis complete!")
+        print(f"Output directory: {output_dir}")
+        print("=" * 70)
 
-    if n_with_scores == 0:
-        print("Error: No problems with score trajectories found.")
-        sys.exit(1)
+    else:
+        # MULTI-TEMPERATURE MODE (new behavior)
+        # Determine output directory
+        if args.output_dir:
+            output_dir = args.output_dir
+        elif category and approach:
+            output_dir = f"outputs/traj-{category}-{approach}-multi"
+        else:
+            print("Error: --output-dir is required when using --hub-path")
+            sys.exit(1)
 
-    # Generate per-problem plots
-    print("\nGenerating per-problem trajectory plots...")
-    generate_per_problem_plots(
-        per_problem_data,
-        difficulty_levels,
-        baselines,
-        output_dir,
-        samples_per_level=args.samples_per_level,
-        verbose=args.verbose,
-    )
+        print("=" * 70)
+        print("PRM Score Trajectory Analysis (Multi-Temperature)")
+        print("=" * 70)
+        print(f"\nHub path: {hub_path}")
+        print(f"Output:   {output_dir}")
 
-    # Generate aggregate plot (supplementary)
-    print("\nGenerating aggregate plot...")
-    generate_aggregate_plot(per_problem_data, output_dir, verbose=args.verbose)
+        # Clean output directory
+        if os.path.exists(output_dir):
+            if args.verbose:
+                print(f"\nCleaning output directory: {output_dir}")
+            shutil.rmtree(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
 
-    # Generate report
-    print("\nGenerating report...")
-    generate_report(
-        per_problem_data,
-        difficulty_levels,
-        baselines,
-        output_dir,
-        hub_path=hub_path,
-        temp_used=selected_temp,
-        seed_used=selected_seed,
-        verbose=args.verbose,
-    )
+        # Validate reference temperature
+        reference_temp = args.reference_temp
+        if reference_temp not in single_temps:
+            print(f"Error: Reference temperature {reference_temp} not found in data")
+            print(f"Available temperatures: {single_temps}")
+            sys.exit(1)
 
-    print("\n" + "=" * 70)
-    print("Analysis complete!")
-    print(f"Output directory: {output_dir}")
-    print("=" * 70)
+        print(f"\nReference temperature: {reference_temp}")
+
+        # Load ALL temperatures
+        if args.verbose:
+            print(f"\nLoading datasets for all temperatures...")
+
+        try:
+            datasets_by_temp = load_experiment_data_by_temperature(
+                config,
+                verbose=args.verbose,
+            )
+        except Exception as e:
+            print(f"Error loading datasets: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+
+        # Filter to only single temperatures (not HNC)
+        datasets_by_temp = {t: ds for t, ds in datasets_by_temp.items() if isinstance(t, (int, float))}
+
+        # Filter to valid temperatures (complete seed coverage)
+        print(f"\nFiltering to temperatures with complete seed coverage...")
+        try:
+            valid_temps = filter_valid_temperatures(
+                datasets_by_temp,
+                reference_temp,
+                verbose=args.verbose,
+            )
+        except Exception as e:
+            print(f"Error filtering temperatures: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+
+        if not valid_temps:
+            print("Error: No temperatures with complete seed coverage")
+            sys.exit(1)
+
+        print(f"Valid temperatures: {valid_temps}")
+
+        # Filter datasets to only valid temperatures
+        datasets_by_temp = {t: ds for t, ds in datasets_by_temp.items() if t in valid_temps}
+
+        # Compute difficulty baselines from reference temperature
+        print(f"\nComputing difficulty baselines from T={reference_temp}...")
+        reference_datasets = datasets_by_temp[reference_temp]
+        baseline_input = {f"T{reference_temp}": reference_datasets}
+
+        try:
+            baselines = compute_problem_baselines_from_completions(
+                baseline_input,
+                aggregate_across_approaches=True,
+                verbose=args.verbose,
+            )
+        except Exception as e:
+            print(f"Error computing baselines: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+
+        # Stratify by absolute difficulty thresholds
+        try:
+            difficulty_levels = stratify_by_absolute_difficulty(
+                baselines,
+                thresholds=DEFAULT_DIFFICULTY_THRESHOLDS,
+                verbose=args.verbose,
+            )
+        except Exception as e:
+            print(f"Error stratifying: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+
+        # Get consistent problem sets across temperatures
+        print(f"\nComputing consistent problem sets across temperatures...")
+        consistent_problem_sets = get_consistent_problem_set(
+            datasets_by_temp,
+            difficulty_levels,
+            verbose=args.verbose,
+        )
+
+        # Update difficulty levels with consistent problem sets
+        for level in difficulty_levels:
+            difficulty_levels[level].problem_ids = consistent_problem_sets[level]
+            difficulty_levels[level].problem_count = len(consistent_problem_sets[level])
+
+        # Select seed for trajectory extraction
+        if args.seed is not None:
+            if args.seed not in config.seeds:
+                print(f"Error: Seed {args.seed} not available. Available: {config.seeds}")
+                sys.exit(1)
+            selected_seed = args.seed
+        else:
+            selected_seed = config.seeds[0]
+
+        print(f"Using seed {selected_seed} for trajectory extraction")
+
+        # Extract per-problem data for each temperature
+        print(f"\nExtracting trajectory data for each temperature...")
+        per_problem_data_by_temp = {}
+
+        for temp in tqdm(valid_temps, desc="Processing temperatures", disable=not args.verbose):
+            seed_datasets = datasets_by_temp[temp]
+            if selected_seed not in seed_datasets:
+                print(f"  Warning: Seed {selected_seed} not found for T={temp}, skipping")
+                continue
+
+            # Get consistent problems for filtering
+            all_consistent_problems = set()
+            for level_pids in consistent_problem_sets.values():
+                all_consistent_problems.update(level_pids)
+
+            target_dataset = seed_datasets[selected_seed]
+            per_problem_data = extract_per_problem_data(
+                target_dataset,
+                problem_filter=all_consistent_problems,
+            )
+            per_problem_data_by_temp[temp] = per_problem_data
+
+            n_with_scores = sum(1 for d in per_problem_data.values() if d["correct"] or d["incorrect"])
+            if args.verbose:
+                print(f"  T={temp}: {n_with_scores} problems with trajectories")
+
+        # Generate per-temperature plots
+        print(f"\nGenerating per-temperature plots...")
+        for temp in tqdm(valid_temps, desc="Generating plots", disable=not args.verbose):
+            if temp not in per_problem_data_by_temp:
+                continue
+
+            temp_output_dir = os.path.join(output_dir, f"T{temp}")
+            os.makedirs(temp_output_dir, exist_ok=True)
+
+            per_problem_data = per_problem_data_by_temp[temp]
+
+            # Generate per-problem plots
+            generate_per_problem_plots(
+                per_problem_data,
+                difficulty_levels,
+                baselines,
+                temp_output_dir,
+                samples_per_level=args.samples_per_level,
+                verbose=False,  # Suppress per-file messages in multi-temp mode
+            )
+
+            # Generate aggregate plot
+            generate_aggregate_plot(per_problem_data, temp_output_dir, verbose=False)
+
+            # Generate report
+            generate_report(
+                per_problem_data,
+                difficulty_levels,
+                baselines,
+                temp_output_dir,
+                hub_path=hub_path,
+                temp_used=temp,
+                seed_used=selected_seed,
+                verbose=False,
+            )
+
+        # Generate cross-temperature comparison plots
+        print(f"\nGenerating cross-temperature comparison plots...")
+        generate_temperature_comparison_plots(
+            per_problem_data_by_temp,
+            difficulty_levels,
+            output_dir,
+            verbose=args.verbose,
+        )
+
+        # Save metadata
+        metadata = {
+            "hub_path": hub_path,
+            "reference_temperature": reference_temp,
+            "valid_temperatures": valid_temps,
+            "seeds": config.seeds,
+            "seed_used_for_plots": selected_seed,
+            "difficulty_levels": {
+                level: {
+                    "min_accuracy": info.min_accuracy,
+                    "max_accuracy": info.max_accuracy,
+                    "problem_count": info.problem_count,
+                }
+                for level, info in difficulty_levels.items()
+            },
+        }
+        metadata_path = os.path.join(output_dir, "metadata.json")
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        if args.verbose:
+            print(f"  Saved: {metadata_path}")
+
+        # Optionally save baselines
+        if args.save_baselines:
+            baselines_dict = {
+                pid: {
+                    "unique_id": bl.unique_id,
+                    "mean_accuracy": bl.mean_accuracy,
+                    "num_evaluations": bl.num_evaluations,
+                    "problem_text": bl.problem_text[:100],  # Truncate for readability
+                    "answer": bl.answer,
+                }
+                for pid, bl in baselines.items()
+            }
+            baselines_path = os.path.join(output_dir, "difficulty_baselines.json")
+            with open(baselines_path, "w") as f:
+                json.dump(baselines_dict, f, indent=2)
+
+            if args.verbose:
+                print(f"  Saved: {baselines_path}")
+
+        # Generate temperature comparison report
+        report_lines = []
+        report_lines.append("# Multi-Temperature PRM Score Trajectory Analysis\n")
+        report_lines.append(f"**Hub path:** `{hub_path}`\n")
+        report_lines.append(f"**Reference temperature:** {reference_temp}\n")
+        report_lines.append(f"**Valid temperatures:** {valid_temps}\n")
+        report_lines.append(f"**Seed (for plots):** {selected_seed}\n")
+        report_lines.append("\n## Temperature Coverage\n")
+        report_lines.append("| Temperature | Seeds Available | Status |")
+        report_lines.append("|-------------|-----------------|--------|")
+        for temp in sorted(single_temps):
+            if temp in valid_temps:
+                seeds = sorted(datasets_by_temp[temp].keys())
+                report_lines.append(f"| {temp} | {seeds} | ✓ Analyzed |")
+            else:
+                status = "✗ Incomplete seed coverage"
+                report_lines.append(f"| {temp} | - | {status} |")
+        report_lines.append("\n## Difficulty Levels\n")
+        report_lines.append("| Level | Accuracy Range | Problem Count (Consistent) |")
+        report_lines.append("|-------|----------------|----------------------------|")
+        for level in sorted(difficulty_levels.keys()):
+            info = difficulty_levels[level]
+            report_lines.append(f"| {level} | {info.min_accuracy:.0%} - {info.max_accuracy:.0%} | {info.problem_count} |")
+        report_lines.append("\n## Output Structure\n")
+        report_lines.append("- `T{temp}/`: Per-temperature analysis (plots, reports)")
+        report_lines.append("- `comparison/`: Cross-temperature comparison plots")
+        report_lines.append("- `metadata.json`: Analysis metadata")
+        if args.save_baselines:
+            report_lines.append("- `difficulty_baselines.json`: Difficulty baseline data")
+
+        report_path = os.path.join(output_dir, "temperature_comparison_report.md")
+        with open(report_path, "w") as f:
+            f.write("\n".join(report_lines))
+
+        if args.verbose:
+            print(f"  Saved: {report_path}")
+
+        print("\n" + "=" * 70)
+        print("Multi-temperature analysis complete!")
+        print(f"Output directory: {output_dir}")
+        print(f"Temperatures analyzed: {valid_temps}")
+        print("=" * 70)
 
 
 if __name__ == "__main__":
