@@ -62,11 +62,13 @@ class ExperimentConfig:
         """Get unique temperatures from all subsets.
 
         For HNC strategy, returns the temperature lists.
+        For early strategy, returns (low, high) tuples.
         For default strategy, returns single temperatures.
         """
         temps = set()
         for s in self.subsets:
-            if s.is_hnc:
+            if s.is_hnc or s.strategy == "early":
+                # HNC and early strategies both use temperature lists/tuples
                 temps.add(tuple(s.temperatures))
             elif s.temperature is not None:
                 temps.add(s.temperature)
@@ -87,11 +89,11 @@ class ExperimentConfig:
     def group_by_temperature(self) -> dict[Any, list[SubsetInfo]]:
         """Group subsets by temperature configuration.
 
-        Keys are either float (default) or tuple of floats (hnc).
+        Keys are either float (default) or tuple of floats (hnc/early).
         """
         result = defaultdict(list)
         for s in self.subsets:
-            if s.is_hnc:
+            if s.is_hnc or s.strategy == "early":
                 key = tuple(s.temperatures)
             else:
                 key = s.temperature
@@ -113,9 +115,9 @@ class ExperimentConfig:
         """Get subsets matching a specific temperature configuration."""
         result = []
         for s in self.subsets:
-            if s.is_hnc and tuple(s.temperatures) == temperature:
+            if (s.is_hnc or s.strategy == "early") and tuple(s.temperatures) == temperature:
                 result.append(s)
-            elif not s.is_hnc and s.temperature == temperature:
+            elif not s.is_hnc and s.strategy != "early" and s.temperature == temperature:
                 result.append(s)
         return result
 
@@ -124,7 +126,7 @@ class ExperimentConfig:
 
         Args:
             seed: Seed value to match
-            temperature: Temperature to match (float for default, tuple for hnc)
+            temperature: Temperature to match (float for default, tuple for hnc/early)
 
         Returns:
             Subset name if found, None otherwise
@@ -134,9 +136,9 @@ class ExperimentConfig:
                 continue
             if temperature is None:
                 return s.raw_name
-            if s.is_hnc and tuple(s.temperatures) == temperature:
+            if (s.is_hnc or s.strategy == "early") and tuple(s.temperatures) == temperature:
                 return s.raw_name
-            if not s.is_hnc and s.temperature == temperature:
+            if not s.is_hnc and s.strategy != "early" and s.temperature == temperature:
                 return s.raw_name
         return None
 
@@ -148,13 +150,13 @@ class ExperimentConfig:
 
         Returns:
             Dictionary mapping temperature -> subset_name
-            Temperature is float for default strategy, tuple for hnc
+            Temperature is float for default strategy, tuple for hnc/early
         """
         result = {}
         for s in self.subsets:
             if s.seed != seed:
                 continue
-            if s.is_hnc:
+            if s.is_hnc or s.strategy == "early":
                 key = tuple(s.temperatures)
             else:
                 key = s.temperature
@@ -170,7 +172,7 @@ class ExperimentConfig:
         """
         result = []
         for s in self.subsets:
-            if s.is_hnc:
+            if s.is_hnc or s.strategy == "early":
                 temp = tuple(s.temperatures)
             else:
                 temp = s.temperature

@@ -38,6 +38,15 @@ hub_paths:
     - ENSEONG/preprocessed-default-MATH-500-Qwen2.5-3B-Instruct-beam_search
     - ENSEONG/preprocessed-default-MATH-500-Qwen2.5-3B-Instruct-dvts
 
+  math500_full_Qwen2.5-3B:
+    - ENSEONG/full-math-private-Qwen2.5-3B-Instruct-bon
+
+  # =============================================================================
+  # MATH-500 Dataset - early Strategy (Fixed Temperature)
+  # =============================================================================
+  math500-early_Qwen2.5-3B:
+    - ENSEONG/preprocessed-score-early-MATH-500-Qwen2.5-3B-Instruct-bon
+
   # =============================================================================
   # AIME25 Dataset - Qwen2.5-1.5B-Instruct
   # =============================================================================

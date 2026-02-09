@@ -11,6 +11,10 @@ Naming patterns:
 2. HNC strategy (multi-temperature):
    - BON: {source}_{dataset}--temps_{t1}_{t2}...--top_p-{value}--n-{n}--seed-{seed}--agg_strategy-last
    - Beam/DVTS: {source}_{dataset}--temps_{t1}_{t2}...--top_p-{value}--n-{n}--m-{m}--iters-{iters}--look-{look}--seed-{seed}--agg_strategy--last
+
+3. Early difficulty estimation strategy:
+   - Format: temp-low-{low_temp}-high-{high_temp}
+   - Example: temp-low-0.1-high-0.8
 """
 
 import re
@@ -26,9 +30,9 @@ class SubsetInfo:
         raw_name: Original subset name
         dataset_source: Dataset source (e.g., "HuggingFaceH4", "math-ai")
         dataset_name: Dataset name (e.g., "MATH-500", "aime25")
-        strategy: Temperature strategy ("default" or "hnc")
+        strategy: Temperature strategy ("default", "hnc", or "early")
         temperature: Single temperature for default strategy
-        temperatures: List of temperatures for HNC strategy
+        temperatures: List of temperatures for HNC strategy or (low, high) tuple for early strategy
         temperature_ratios: List of ratios for HNC strategy
         top_p: Top-p sampling parameter
         n: Number of samples
@@ -105,8 +109,28 @@ def parse_subset_name(name: str) -> SubsetInfo:
         True
         >>> info.temperatures
         [0.4, 0.8, 1.2, 1.6]
+
+        >>> info = parse_subset_name("temp-low-0.1-high-0.8")
+        >>> info.strategy
+        'early'
+        >>> info.temperatures
+        [0.1, 0.8]
     """
     info = SubsetInfo(raw_name=name)
+
+    # Check for early difficulty estimation format first
+    if name.startswith("temp-low-"):
+        # Format: temp-low-{low_temp}-high-{high_temp}
+        # Example: temp-low-0.1-high-0.8
+        match = re.match(r"temp-low-([\d.]+)-high-([\d.]+)", name)
+        if match:
+            low_temp = float(match.group(1))
+            high_temp = float(match.group(2))
+            info.strategy = "early"
+            info.temperatures = [low_temp, high_temp]
+            info.seed = 0  # Default seed for early datasets
+            # No dataset_source/dataset_name in subset name for early format
+            return info
 
     # Split by '--' to get segments
     segments = name.split("--")
@@ -275,9 +299,11 @@ def infer_strategy_from_hub_path(hub_path: str) -> str:
         hub_path: Hub dataset path
 
     Returns:
-        Strategy name ("hnc" or "default")
+        Strategy name ("hnc", "early", or "default")
     """
     repo_name = hub_path.split("/")[-1].lower()
+    if "early" in repo_name:
+        return "early"
     if repo_name.startswith("hnc"):
         return "hnc"
     return "default"
