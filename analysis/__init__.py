@@ -86,6 +86,9 @@ from .difficulty_temperature import (
     generate_difficulty_temperature_report,
 )
 
+# Scoring - imported lazily to avoid multiprocessing.Manager() on import
+# Use: from analysis.scoring import ScoringConfig, score_dataset, score_pass_at_k
+
 # Visualization
 from .visualization import (
     APPROACH_COLORS,
@@ -145,6 +148,8 @@ __all__ = [
     "analyze_temperature_by_difficulty",
     "generate_difficulty_temperature_plots",
     "generate_difficulty_temperature_report",
+    # Scoring (import from analysis.scoring directly)
+    # "ScoringConfig", "score_dataset", "score_pass_at_k",
     # Visualization
     "setup_style",
     "save_figure",
