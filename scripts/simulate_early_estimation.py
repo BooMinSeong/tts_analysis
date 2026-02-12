@@ -23,6 +23,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+import numpy as np
 from datasets import Dataset, load_dataset
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -71,6 +72,7 @@ def simulate_adaptive_selection(
     probe_n: int = 8,
     total_n: int = 64,
     dominance_threshold: int = 4,
+    seed: int = 42,
     verbose: bool = True,
 ) -> list[dict]:
     """Run adaptive selection simulation for all problems.
@@ -87,6 +89,7 @@ def simulate_adaptive_selection(
         probe_n: Number of probe samples from low-temp
         total_n: Total budget of predictions to use
         dominance_threshold: Min count for dominant prediction
+        seed: Random seed for reproducible sampling
         verbose: Print progress
 
     Returns:
@@ -95,11 +98,15 @@ def simulate_adaptive_selection(
     common_ids = sorted(set(low_by_id.keys()) & set(high_by_id.keys()))
     remaining_n = total_n - probe_n
 
+    # Initialize RNG for reproducible sampling
+    rng = np.random.default_rng(seed)
+
     if verbose:
         print(f"\nSimulation parameters:")
         print(f"  Probe samples (low-temp): {probe_n}")
         print(f"  Total budget: {total_n}")
         print(f"  Dominance threshold: {dominance_threshold}")
+        print(f"  Random seed: {seed}")
         print(f"  Remaining after probe: {remaining_n}")
 
     results = []
@@ -115,25 +122,37 @@ def simulate_adaptive_selection(
         completions_low = row_low.get("completions", [])
         completions_high = row_high.get("completions", [])
 
-        # Probe: first probe_n from low-temp
-        probe_preds = preds_low[:probe_n]
-        probe_scores = scores_low[:probe_n]
-        probe_completions = completions_low[:probe_n]
+        n_low = len(preds_low)
+        n_high = len(preds_high)
+
+        # Probe: randomly sample probe_n from low-temp (instead of [:probe_n])
+        probe_indices = rng.choice(n_low, size=min(probe_n, n_low), replace=False)
+        probe_preds = [preds_low[i] for i in probe_indices]
+        probe_scores = [scores_low[i] for i in probe_indices] if scores_low else []
+        probe_completions = [completions_low[i] for i in probe_indices] if completions_low else []
 
         # Agreement check
         counter = Counter(probe_preds)
         most_common_count = counter.most_common(1)[0][1]
         dominant = most_common_count >= dominance_threshold
 
-        # Adaptive selection (parallel for all three fields)
+        # Adaptive selection with random sampling
         if dominant:
-            selected_preds = preds_low[:total_n]
-            selected_scores = scores_low[:total_n]
-            selected_completions = completions_low[:total_n]
+            # Randomly sample total_n from low-temp (instead of [:total_n])
+            all_indices = rng.choice(n_low, size=min(total_n, n_low), replace=False)
+            selected_preds = [preds_low[i] for i in all_indices]
+            selected_scores = [scores_low[i] for i in all_indices] if scores_low else []
+            selected_completions = [completions_low[i] for i in all_indices] if completions_low else []
         else:
-            selected_preds = probe_preds + preds_high[:remaining_n]
-            selected_scores = probe_scores + scores_high[:remaining_n]
-            selected_completions = probe_completions + completions_high[:remaining_n]
+            # Keep probe + randomly sample remaining from high-temp (instead of [:remaining_n])
+            remaining_indices = rng.choice(n_high, size=min(remaining_n, n_high), replace=False)
+            remaining_preds = [preds_high[i] for i in remaining_indices]
+            remaining_scores = [scores_high[i] for i in remaining_indices] if scores_high else []
+            remaining_completions = [completions_high[i] for i in remaining_indices] if completions_high else []
+
+            selected_preds = probe_preds + remaining_preds
+            selected_scores = probe_scores + remaining_scores
+            selected_completions = probe_completions + remaining_completions
 
         # Build result row
         result = {
@@ -216,6 +235,8 @@ def main():
                         help="Total prediction budget (default: 64)")
     parser.add_argument("--dominance-threshold", type=int, default=4,
                         help="Min count for dominant prediction (default: 4)")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="Random seed for sampling (default: 42)")
     parser.add_argument("--output-dir", type=str,
                         help="Directory to save results")
     parser.add_argument("--output-hub-path", type=str,
@@ -235,6 +256,7 @@ def main():
         print(f"  Low temp: {args.low_temp}, High temp: {args.high_temp}")
         print(f"  Probe: {args.probe_n}, Total: {args.total_n}")
         print(f"  Dominance threshold: {args.dominance_threshold}")
+        print(f"  Random seed: {args.seed}")
 
     # Load data
     low_by_id, high_by_id = load_unified_subsets(
@@ -247,6 +269,7 @@ def main():
         probe_n=args.probe_n,
         total_n=args.total_n,
         dominance_threshold=args.dominance_threshold,
+        seed=args.seed,
         verbose=verbose,
     )
 
@@ -265,13 +288,16 @@ def main():
             print(f"\n  Dataset saved to {ds_path}")
 
         # Save summary as JSON
+        subset_name = f"temp-low-{args.low_temp}-high-{args.high_temp}-probe-{args.probe_n}_total-{args.total_n}_thresh-{args.dominance_threshold}_seed-{args.seed}"
         summary = {
             "hub_path": args.hub_path,
+            "subset_name": subset_name,
             "low_temp": args.low_temp,
             "high_temp": args.high_temp,
             "probe_n": args.probe_n,
             "total_n": args.total_n,
             "dominance_threshold": args.dominance_threshold,
+            "seed": args.seed,
             "total_problems": len(results),
             "n_dominant": sum(1 for r in results if r["dominant"]),
             "n_non_dominant": sum(1 for r in results if not r["dominant"]),
@@ -284,7 +310,9 @@ def main():
 
     if args.push_to_hub and args.output_hub_path:
         ds = Dataset.from_list(results)
-        config_name = f"probe-{args.probe_n}_total-{args.total_n}_thresh-{args.dominance_threshold}"
+        # Include temperature config and seed in subset name for reproducibility
+        # Format: temp-low-{low}-high-{high}-probe-{p}_total-{t}_thresh-{th}_seed-{s}
+        config_name = f"temp-low-{args.low_temp}-high-{args.high_temp}-probe-{args.probe_n}_total-{args.total_n}_thresh-{args.dominance_threshold}_seed-{args.seed}"
         if verbose:
             print(f"\n  Pushing to {args.output_hub_path} (config: {config_name})...")
         ds.push_to_hub(args.output_hub_path, config_name=config_name, private=False)

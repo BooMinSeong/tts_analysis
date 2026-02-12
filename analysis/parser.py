@@ -13,8 +13,9 @@ Naming patterns:
    - Beam/DVTS: {source}_{dataset}--temps_{t1}_{t2}...--top_p-{value}--n-{n}--m-{m}--iters-{iters}--look-{look}--seed-{seed}--agg_strategy--last
 
 3. Early difficulty estimation strategy:
-   - Format: temp-low-{low_temp}-high-{high_temp}
-   - Example: temp-low-0.1-high-0.8
+   - Format: temp-low-{low}-high-{high}-probe-{p}_total-{t}_thresh-{th}_seed-{s}
+   - Example: temp-low-0.1-high-0.8-probe-8_total-64_thresh-5_seed-0
+   - Legacy format: temp-low-{low}-high-{high} (seed defaults to 0)
 """
 
 import re
@@ -42,6 +43,11 @@ class SubsetInfo:
         lookahead: Lookahead value (for beam_search/dvts)
         agg_strategy: Aggregation strategy
         is_beam_search_type: Whether this is beam_search or dvts (has m, iters, look)
+
+        # Early estimation fields:
+        probe_n: Number of probe samples for early estimation
+        total_n: Total number of samples available
+        dominance_threshold: Threshold for temperature selection decision
     """
     raw_name: str
     dataset_source: str = ""
@@ -57,6 +63,11 @@ class SubsetInfo:
     iters: Optional[int] = None
     lookahead: Optional[int] = None
     agg_strategy: str = "last"
+
+    # Early estimation fields
+    probe_n: Optional[int] = None
+    total_n: Optional[int] = None
+    dominance_threshold: Optional[int] = None
 
     @property
     def is_beam_search_type(self) -> bool:
@@ -110,26 +121,41 @@ def parse_subset_name(name: str) -> SubsetInfo:
         >>> info.temperatures
         [0.4, 0.8, 1.2, 1.6]
 
-        >>> info = parse_subset_name("temp-low-0.1-high-0.8")
+        >>> # Early estimation format (new)
+        >>> info = parse_subset_name("temp-low-0.1-high-0.8-probe-8_total-64_thresh-5_seed-0")
         >>> info.strategy
         'early'
         >>> info.temperatures
         [0.1, 0.8]
+        >>> info.seed
+        0
+        >>> info.probe_n
+        8
     """
     info = SubsetInfo(raw_name=name)
 
     # Check for early difficulty estimation format first
     if name.startswith("temp-low-"):
-        # Format: temp-low-{low_temp}-high-{high_temp}
-        # Example: temp-low-0.1-high-0.8
+        # Format: temp-low-{low}-high-{high}-probe-{p}_total-{t}_thresh-{th}_seed-{s}
+        # Example: temp-low-0.1-high-0.8-probe-8_total-64_thresh-5_seed-0
+        pattern = r"temp-low-([\d.]+)-high-([\d.]+)-probe-(\d+)_total-(\d+)_thresh-(\d+)_seed-(\d+)"
+        match = re.match(pattern, name)
+        if match:
+            info.strategy = "early"
+            info.temperatures = [float(match.group(1)), float(match.group(2))]
+            info.probe_n = int(match.group(3))
+            info.total_n = int(match.group(4))
+            info.dominance_threshold = int(match.group(5))
+            info.seed = int(match.group(6))
+            # No dataset_source/dataset_name in subset name for early format
+            return info
+
+        # Fallback for old format (temp-low-{low}-high-{high} only)
         match = re.match(r"temp-low-([\d.]+)-high-([\d.]+)", name)
         if match:
-            low_temp = float(match.group(1))
-            high_temp = float(match.group(2))
             info.strategy = "early"
-            info.temperatures = [low_temp, high_temp]
-            info.seed = 0  # Default seed for early datasets
-            # No dataset_source/dataset_name in subset name for early format
+            info.temperatures = [float(match.group(1)), float(match.group(2))]
+            info.seed = 0  # Default for legacy format
             return info
 
     # Split by '--' to get segments

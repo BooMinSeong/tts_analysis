@@ -711,27 +711,31 @@ def run_temperature_comparison(
             for hub_path, config, path_results in experiments:
                 all_temps.update(path_results.keys())
 
-            if len(all_temps) < 2:
-                print(f"  Skipping: Only {len(all_temps)} temperature(s) found")
-                continue
+            # Allow single-temperature analysis (generates detailed plots instead of comparison)
+            is_single_temp = len(all_temps) == 1
+            if is_single_temp and verbose:
+                print(f"  Single temperature found - generating detailed analysis plots")
 
             # Plot scaling curves with all temperatures
             plot_temperature_scaling_curves(
                 experiments, all_temps, model_short, approach,
-                os.path.join(output_dir, f"{model_short}-{approach}-temp_scaling.png")
+                os.path.join(output_dir, f"{model_short}-{approach}-temp_scaling.png"),
+                is_single_temp=is_single_temp
             )
 
             # Plot temperature comparison for each method
             for method in methods:
                 plot_temperature_method_comparison(
                     experiments, all_temps, model_short, approach, method,
-                    os.path.join(output_dir, f"{model_short}-{approach}-{method}-temp_comparison.png")
+                    os.path.join(output_dir, f"{model_short}-{approach}-{method}-temp_comparison.png"),
+                    is_single_temp=is_single_temp
                 )
 
             # Plot pass@k comparison by temperature
             plot_temperature_pass_at_k(
                 experiments, all_temps, model_short, approach,
-                os.path.join(output_dir, f"{model_short}-{approach}-pass_at_k_by_temp.png")
+                os.path.join(output_dir, f"{model_short}-{approach}-pass_at_k_by_temp.png"),
+                is_single_temp=is_single_temp
             )
 
     if generate_report:
@@ -746,6 +750,7 @@ def plot_temperature_scaling_curves(
     model_short: str,
     approach: str,
     output_path: str,
+    is_single_temp: bool = False,
 ):
     """Plot scaling curves comparing different temperatures."""
     setup_style()
@@ -791,7 +796,8 @@ def plot_temperature_scaling_curves(
 
     ax.set_xlabel("Number of Samples (n)", fontsize=12)
     ax.set_ylabel("Accuracy", fontsize=12)
-    ax.set_title(f"{model_short} - {approach.replace('_', ' ').title()}\nTemperature Comparison",
+    title_suffix = "Detailed Analysis" if is_single_temp else "Temperature Comparison"
+    ax.set_title(f"{model_short} - {approach.replace('_', ' ').title()}\n{title_suffix}",
                 fontsize=14, fontweight="bold")
     ax.set_xscale("log", base=2)
     ax.legend(loc="best", ncol=3, fontsize=8)
@@ -809,6 +815,7 @@ def plot_temperature_method_comparison(
     approach: str,
     method: str,
     output_path: str,
+    is_single_temp: bool = False,
 ):
     """Plot single method comparison across temperatures."""
     setup_style()
@@ -849,7 +856,8 @@ def plot_temperature_method_comparison(
 
     ax.set_xlabel("Number of Samples (n)", fontsize=12)
     ax.set_ylabel("Accuracy", fontsize=12)
-    ax.set_title(f"{model_short} - {approach.replace('_', ' ').title()} - {method.upper()}\nTemperature Comparison",
+    title_suffix = "Detailed Analysis" if is_single_temp else "Temperature Comparison"
+    ax.set_title(f"{model_short} - {approach.replace('_', ' ').title()} - {method.upper()}\n{title_suffix}",
                 fontsize=14, fontweight="bold")
     ax.legend(loc="best")
     ax.set_xscale("log", base=2)
@@ -866,6 +874,7 @@ def plot_temperature_pass_at_k(
     model_short: str,
     approach: str,
     output_path: str,
+    is_single_temp: bool = False,
 ):
     """Plot pass@k curves comparing different temperatures."""
     setup_style()
@@ -906,7 +915,8 @@ def plot_temperature_pass_at_k(
 
     ax.set_xlabel("k", fontsize=12)
     ax.set_ylabel("Pass@k", fontsize=12)
-    ax.set_title(f"{model_short} - {approach.replace('_', ' ').title()}\nPass@k by Temperature",
+    title_suffix = "Pass@k Analysis" if is_single_temp else "Pass@k by Temperature"
+    ax.set_title(f"{model_short} - {approach.replace('_', ' ').title()}\n{title_suffix}",
                 fontsize=14, fontweight="bold")
     ax.set_xscale("log", base=2)
     ax.legend(loc="best")
@@ -940,10 +950,7 @@ def generate_temperature_comparison_report(
 
         sorted_temps = sorted(all_temps, key=lambda x: x if isinstance(x, (int, float)) else x[0])
 
-        if len(sorted_temps) < 2:
-            md_lines.append(f"*Only {len(sorted_temps)} temperature(s) found*\n\n")
-            continue
-
+        # Allow single-temperature reports (shows single column table)
         for method in methods:
             md_lines.append(f"### {method.upper()}\n\n")
 
