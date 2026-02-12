@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **For user-facing documentation, see [README.md](README.md)**
+
 ## Project Overview
 
 This is a **test-time scaling (TTS) experiment analysis** tool for mathematical reasoning tasks. The project analyzes LLM outputs from various search strategies (Best-of-N, Beam Search, DVTS) across different temperatures and model sizes.
@@ -12,109 +14,9 @@ The project uses **uv** for Python package management. Always use `uv run python
 
 ## Command Reference
 
-### Running Analyses
+See [README.md](README.md) for all commands and usage examples.
 
-```bash
-# List all available experiments
-uv run python scripts/analyze_results.py --list
-
-# Analyze single experiment (auto-discovers all metadata from Hub)
-uv run python scripts/analyze_results.py ENSEONG/hnc-Qwen2.5-1.5B-Instruct-bon
-
-# Analyze by category (defined in configs/registry.yaml)
-uv run python scripts/analyze_results.py --category math500_Qwen2.5-1.5B
-
-# Compare HNC vs Default strategies
-uv run python scripts/analyze_results.py \
-    --category math500_Qwen2.5-1.5B_hnc,math500_Qwen2.5-1.5B \
-    --analysis-type hnc_comparison
-
-# Temperature comparison analysis
-uv run python scripts/analyze_results.py \
-    --category aime25_Qwen2.5-1.5B \
-    --analysis-type temperature_comparison
-
-# Difficulty-temperature analysis
-uv run python scripts/analyze_difficulty_temperature.py \
-    --category math500_Qwen2.5-1.5B \
-    --approach bon \
-    --output-dir analysis_output
-
-# Run all difficulty-temperature analyses
-bash analyze_difficulty_temperature_all.sh
-```
-
-### Dataset Preprocessing
-
-Preprocessing is required for raw datasets before analysis. It extracts predictions into standardized fields.
-
-```bash
-# Preprocess all experiments (2-4 hours)
-bash preprocess_all.sh
-
-# Preprocess by category
-uv run python scripts/preprocess_dataset.py \
-    --category math500_Qwen2.5-1.5B \
-    --push-to-hub \
-    --validate
-
-# Preprocess single experiment
-uv run python scripts/preprocess_dataset.py \
-    --hub-path ENSEONG/default-MATH-500-Qwen2.5-1.5B-Instruct-bon \
-    --push-to-hub
-
-# Local testing (no Hub push)
-uv run python scripts/preprocess_dataset.py \
-    --hub-path ENSEONG/default-MATH-500-Qwen2.5-1.5B-Instruct-bon \
-    --output-dir /tmp/preprocessed-test
-```
-
-After preprocessing, update `configs/registry.yaml` to use the preprocessed Hub paths (prefix: `preprocessed-`).
-
-## Architecture
-
-### Auto-Discovery System
-
-The project's key architectural innovation is automatic metadata discovery from Hub dataset subset names:
-
-1. **Parser (`analysis/parser.py`)**: Parses subset names to extract temperature, seed, strategy
-   - Default strategy: `{source}_{dataset}--T-{temp}--...--seed-{seed}--...`
-   - HNC strategy: `{source}_{dataset}--temps_{t1}_{t2}...--...--seed-{seed}--...`
-
-2. **Discovery (`analysis/discovery.py`)**: Auto-discovers experiment configs from Hub
-   - Returns `ExperimentConfig` with all seeds, temperatures, subsets discovered
-   - No manual config needed beyond Hub path
-
-3. **Registry (`configs/registry.yaml`)**: Only stores Hub paths grouped by category
-   - Seeds, temperatures auto-discovered at runtime
-   - Minimal, declarative configuration
-
-### Module Structure
-
-```
-├── analysis/               # Core analysis modules
-│   ├── parser.py          # Subset name parsing
-│   ├── discovery.py       # Auto-discovery from Hub
-│   ├── datasets.py        # Dataset loading (by temp, seed)
-│   ├── core.py            # Answer evaluation (uses math_verify)
-│   ├── metrics.py         # Pass@k, accuracy calculations
-│   ├── difficulty.py      # Problem difficulty stratification
-│   ├── difficulty_temperature.py  # Difficulty × temperature analysis
-│   ├── preprocessing.py   # Dataset preprocessing
-│   ├── visualization.py   # Plotting utilities
-│   └── comparative_analysis.py  # Cross-experiment comparison
-├── configs/
-│   ├── registry.yaml      # Hub paths by category
-│   └── schemas.py         # Config dataclasses
-├── scripts/               # Executable analysis scripts
-│   ├── analyze_results.py  # Main analysis CLI
-│   ├── analyze_difficulty_temperature.py
-│   ├── preprocess_dataset.py
-│   └── compare_baselines.py
-└── legacy/                # Old scripts (reference only, don't use)
-```
-
-### Key Concepts
+## Key Concepts
 
 **Approaches**: Search strategies used during inference
 - `bon`: Best-of-N sampling
@@ -124,6 +26,7 @@ The project's key architectural innovation is automatic metadata discovery from 
 **Strategies**: Temperature allocation strategies
 - `default`: Single fixed temperature per experiment
 - `hnc`: Heterogeneous N-sample Composition (multiple temps with ratios)
+- `early`: Early difficulty estimation (temperature range)
 
 **Aggregation Methods**: How to select final answer from N samples
 - `naive`: Select based on raw model scores
@@ -136,29 +39,26 @@ The project's key architectural innovation is automatic metadata discovery from 
 - `medium`: 40-80% solve rate
 - `hard`: <40% solve rate
 
-### Data Flow
+## Auto-Discovery System
 
-1. **Load**: `load_experiment_data_by_temperature()` → Dict[temp, Dict[seed, Dataset]]
-2. **Evaluate**: `analyze_single_dataset()` → Dict[method, Dict[n, accuracy]]
-3. **Aggregate**: `aggregate_across_seeds()` → Mean ± std across seeds
-4. **Visualize**: `plot_scaling_curve()`, `plot_comparison()` → Figures + reports
+The project's key architectural innovation is automatic metadata discovery from Hub dataset subset names:
+
+1. **Parser (`analysis/parser.py`)**: Parses subset names to extract temperature, seed, strategy
+   - Default strategy: `{source}_{dataset}--T-{temp}--...--seed-{seed}--...`
+   - HNC strategy: `{source}_{dataset}--temps_{t1}_{t2}...--...--seed-{seed}--...`
+   - Early strategy: `temp-low-{low}-high-{high}`
+
+2. **Discovery (`analysis/discovery.py`)**: Auto-discovers experiment configs from Hub
+   - Returns `ExperimentConfig` with all seeds, temperatures, subsets discovered
+   - No manual config needed beyond Hub path
+
+3. **Registry (`configs/registry.yaml`)**: Only stores Hub paths grouped by category
+   - Seeds, temperatures auto-discovered at runtime
+   - Minimal, declarative configuration
 
 ## Development Patterns
 
-### Adding New Analysis
-
-1. Load data using auto-discovery:
-```python
-from analysis import discover_experiment, load_experiment_data_by_temperature
-
-config = discover_experiment("ENSEONG/hnc-Qwen2.5-1.5B-Instruct-bon")
-datasets = load_experiment_data_by_temperature(config)  # {temp: {seed: Dataset}}
-```
-
-2. Use existing metrics functions from `analysis/metrics.py`
-3. Create visualizations using `analysis/visualization.py` utilities
-
-### Important: Never Hardcode Metadata
+### Never Hardcode Metadata
 
 ❌ **Don't do this**:
 ```python
@@ -173,15 +73,60 @@ seeds = config.seeds  # Auto-discovered
 temperatures = config.temperatures  # Auto-discovered
 ```
 
-### Working with Temperature Data
+### Loading Data Pattern
 
-For temperature comparison analyses, always use `load_experiment_data_by_temperature()`:
 ```python
+from analysis import discover_experiment, load_experiment_data_by_temperature
+
+# Auto-discover config
+config = discover_experiment(hub_path)
+
+# Load by temperature (for temperature analysis)
 datasets_by_temp = load_experiment_data_by_temperature(config)
 for temp, seed_datasets in datasets_by_temp.items():
     for seed, dataset in seed_datasets.items():
-        # Analyze this (temp, seed) combination
-        metrics = analyze_single_dataset(dataset, config.approach, seed)
+        # analyze this (temp, seed) combination
+        metrics = analyze_single_dataset(dataset, hub_path, seed)
+```
+
+### Random Sampling Pattern
+
+```python
+import numpy as np
+
+# Initialize RNG for reproducible sampling
+rng = np.random.default_rng(seed)
+
+# Sample without replacement
+n = len(items)
+k = min(sample_size, n)  # Avoid sampling more than available
+indices = rng.choice(n, size=k, replace=False)
+sampled = [items[i] for i in indices]
+```
+
+### Progress Tracking Pattern
+
+```python
+from tqdm import tqdm
+
+# For user-facing progress
+iterator = tqdm(items, desc="Description", disable=not verbose)
+
+# For nested progress (auto-cleans up)
+nested = tqdm(items, desc="  Detail", leave=False, disable=not verbose)
+```
+
+### Error Handling Pattern
+
+```python
+try:
+    # risky operation
+except Exception as e:
+    print(f"ERROR in {context}: {e}")
+    if verbose:
+        import traceback
+        traceback.print_exc()
+    raise  # or continue, depending on severity
 ```
 
 ### Answer Evaluation
@@ -197,17 +142,33 @@ is_correct = evaluate_answer(completion_text, gold_answer)
 is_correct = evaluate_result(data_row, key="pred_naive@1")
 ```
 
-## Registry Categories
+## Common Pitfalls
 
-The `configs/registry.yaml` organizes experiments by:
-- Dataset: `math500` (MATH-500), `aime25` (AIME 2025)
-- Model: `Qwen2.5-1.5B`, `Qwen2.5-3B`
-- Strategy: `_hnc` suffix for heterogeneous temperature, no suffix for default
+1. **Don't hardcode metadata** - Always discover from Hub using `discover_experiment()`
+2. **Don't forget preprocessing** - Raw datasets won't have `is_correct_*` fields
+3. **Check for verbose flag** - Respect user's output preference with `disable=not verbose`
+4. **Include error context** - Always show (hub, temp, seed) on failure
+5. **Use uv run** - Don't use bare `python` command
 
-Examples:
-- `math500_Qwen2.5-1.5B_hnc`: MATH-500, 1.5B model, HNC strategy
+## Data Flow
+
+1. **Load**: `load_experiment_data_by_temperature()` → `Dict[temp, Dict[seed, Dataset]]`
+2. **Evaluate**: `analyze_single_dataset()` → `Dict[method, Dict[n, accuracy]]`
+3. **Aggregate**: `aggregate_across_seeds()` → Mean ± std across seeds
+4. **Visualize**: `plot_scaling_curve()`, `plot_comparison()` → Figures + reports
+
+## Registry Structure
+
+`configs/registry.yaml` organizes experiments by category:
+
+**Format**: `{dataset}_{model}[_{strategy}]`
+
+**Examples**:
 - `math500_Qwen2.5-3B`: MATH-500, 3B model, default strategy
-- `aime25_Qwen2.5-1.5B`: AIME25, 1.5B model, default strategy
+- `math500_Qwen2.5-3B_hnc`: MATH-500, 3B model, HNC strategy
+- `math500-early_Qwen2.5-3B`: MATH-500, 3B model, early strategy
+
+Contains only Hub paths - metadata auto-discovered at runtime.
 
 ## Output Conventions
 
